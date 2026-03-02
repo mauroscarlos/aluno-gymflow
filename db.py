@@ -210,3 +210,49 @@ def listar_historico(aluno_id, limit=30) -> pd.DataFrame:
     df["treino_nome"] = df["treinos"].apply(lambda x: x["nome"] if isinstance(x, dict) else "—")
     df["treino_desc"] = df["treinos"].apply(lambda x: x.get("descricao","") if isinstance(x, dict) else "")
     return df
+
+def buscar_treino_em_andamento(aluno_id) -> Optional[dict]:
+    """Retorna treino iniciado hoje ainda não finalizado, ou None."""
+    client = get_client()
+    hoje = str(date.today())
+    resp = _retry(lambda: client.table("historico_treinos")
+                  .select("*")
+                  .eq("aluno_id", aluno_id)
+                  .eq("data", hoje)
+                  .is_("finalizado_em", "null")
+                  .order("iniciado_em", desc=True)
+                  .limit(1)
+                  .execute())
+    return resp.data[0] if resp.data else None
+
+def buscar_treino_finalizado_hoje(aluno_id, treino_id) -> Optional[dict]:
+    """Retorna treino já finalizado hoje para este aluno/treino, ou None."""
+    client = get_client()
+    hoje = str(date.today())
+    resp = _retry(lambda: client.table("historico_treinos")
+                  .select("*")
+                  .eq("aluno_id", aluno_id)
+                  .eq("treino_id", treino_id)
+                  .eq("data", hoje)
+                  .not_.is_("finalizado_em", "null")
+                  .limit(1)
+                  .execute())
+    return resp.data[0] if resp.data else None
+
+def series_executadas(historico_treino_id) -> pd.DataFrame:
+    """Retorna todas as séries já executadas neste histórico."""
+    client = get_client()
+    resp = _retry(lambda: client.table("historico_series")
+                  .select("*")
+                  .eq("historico_treino_id", historico_treino_id)
+                  .order("executado_em")
+                  .execute())
+    return pd.DataFrame(resp.data) if resp.data else pd.DataFrame(
+        columns=["id","historico_treino_id","treino_item_id","serie_numero","executado_em"])
+
+def salvar_progresso(historico_id: int, item_idx: int, serie_idx: int):
+    """Salva o progresso atual (item e série) no histórico."""
+    client = get_client()
+    _retry(lambda: client.table("historico_treinos")
+           .update({"item_idx": item_idx, "serie_idx": serie_idx})
+           .eq("id", historico_id).execute())
