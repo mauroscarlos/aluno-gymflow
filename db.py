@@ -256,3 +256,36 @@ def salvar_progresso(historico_id: int, item_idx: int, serie_idx: int):
     _retry(lambda: client.table("historico_treinos")
            .update({"item_idx": item_idx, "serie_idx": serie_idx})
            .eq("id", historico_id).execute())
+
+def listar_historico_hoje(data_str=None) -> pd.DataFrame:
+    """Lista todos os treinos do dia com info de aluno e treino."""
+    from datetime import date as date_cls
+    client = get_client()
+    hoje = data_str or str(date_cls.today())
+    resp = _retry(lambda: client.table("historico_treinos")
+                  .select("*, treinos(nome, descricao), alunos(nome)")
+                  .eq("data", hoje)
+                  .order("iniciado_em", desc=True)
+                  .execute())
+    if not resp.data:
+        return pd.DataFrame()
+    df = pd.DataFrame(resp.data)
+    df["treino_nome"] = df["treinos"].apply(lambda x: x["nome"] if isinstance(x, dict) else "—")
+    df["treino_desc"] = df["treinos"].apply(lambda x: x.get("descricao","") if isinstance(x, dict) else "")
+    df["aluno_nome"] = df["alunos"].apply(lambda x: x["nome"] if isinstance(x, dict) else "—")
+    return df
+
+def reabrir_treino(historico_id: int):
+    """Remove finalizado_em para reabrir o treino."""
+    client = get_client()
+    _retry(lambda: client.table("historico_treinos")
+           .update({"finalizado_em": None})
+           .eq("id", historico_id).execute())
+
+def excluir_historico(historico_id: int):
+    """Exclui o registro de histórico e suas séries."""
+    client = get_client()
+    _retry(lambda: client.table("historico_series")
+           .delete().eq("historico_treino_id", historico_id).execute())
+    _retry(lambda: client.table("historico_treinos")
+           .delete().eq("id", historico_id).execute())
