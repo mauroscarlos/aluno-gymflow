@@ -1,408 +1,492 @@
 """
-GymFlow — App do Aluno
-Execução do treino com timer, estado persistente e proteção contra duplicatas
+GymFlow — App do Professor
+Cadastro de alunos, exercícios, planos e fichas de treino
 """
 import sys, os
-sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+sys.path.insert(0, os.path.dirname(__file__))
 
 import streamlit as st
 import pandas as pd
-from datetime import datetime, date
+from datetime import datetime
 from zoneinfo import ZoneInfo
-import time
 import db
 
 TZ_BR = ZoneInfo("America/Sao_Paulo")
 
-st.set_page_config(page_title="GymFlow — Treino", page_icon="🏋️",
-                   layout="centered", initial_sidebar_state="collapsed")
+st.set_page_config(page_title="GymFlow — Professor", page_icon="🏋️", layout="wide",
+                   initial_sidebar_state="expanded")
 
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=DM+Mono:wght@400;500&family=Figtree:wght@300;400;500;600&display=swap');
 html,body,[class*="css"],.stApp{font-family:'Figtree',sans-serif!important;background:#0e0f13!important;color:#e8eaf0!important}
-.stApp,.main .block-container{background:#0e0f13!important;padding:1rem}
-.stButton>button{background:#1e2029!important;color:#e8eaf0!important;border:1px solid #2a2d3a!important;border-radius:12px!important;font-family:'Figtree',sans-serif!important;font-weight:600!important;font-size:16px!important;padding:12px!important;width:100%}
+.stApp,.main .block-container{background:#0e0f13!important;max-width:1200px}
+section[data-testid="stSidebar"]{background:#16181f!important;border-right:1px solid #2a2d3a!important}
+section[data-testid="stSidebar"] *{color:#e8eaf0!important}
+section[data-testid="stSidebar"] label{color:#7a7f96!important;font-size:11px!important;text-transform:uppercase;letter-spacing:1.5px;font-family:'DM Mono',monospace!important}
+section[data-testid="stSidebar"] [data-baseweb="select"]>div,section[data-testid="stSidebar"] input{background:#1e2029!important;border:1px solid #2a2d3a!important;border-radius:8px!important}
+[data-testid="metric-container"]{background:#16181f!important;border:1px solid #2a2d3a!important;border-radius:14px!important;padding:20px!important;border-top:3px solid #c8f564!important}
+[data-testid="metric-container"] label{font-size:11px!important;text-transform:uppercase!important;letter-spacing:1.5px!important;color:#7a7f96!important;font-family:'DM Mono',monospace!important}
+[data-testid="metric-container"] [data-testid="stMetricValue"]{font-family:'DM Mono',monospace!important;font-size:26px!important}
+.stTabs [data-baseweb="tab-list"]{background:#16181f!important;border-radius:12px!important;padding:4px!important;border:1px solid #2a2d3a!important}
+.stTabs [data-baseweb="tab"]{background:transparent!important;color:#7a7f96!important;border-radius:9px!important;font-weight:600!important;font-size:14px!important;padding:10px 18px!important;border:none!important}
+.stTabs [aria-selected="true"]{background:rgba(200,245,100,0.12)!important;color:#c8f564!important}
+.stTabs [data-baseweb="tab-highlight"],.stTabs [data-baseweb="tab-border"]{display:none!important}
+.stButton>button,.stFormSubmitButton>button{background:#1e2029!important;color:#e8eaf0!important;border:1px solid #2a2d3a!important;border-radius:10px!important;font-family:'Figtree',sans-serif!important;font-weight:600!important}
 .stButton>button:hover{background:#2a2d3a!important;border-color:#c8f564!important;color:#c8f564!important}
-button[kind="primary"]{background:#c8f564!important;color:#0e0f13!important;border:none!important;font-size:18px!important;padding:16px!important;border-radius:14px!important}
+.stFormSubmitButton>button[kind="primaryFormSubmit"],button[kind="primary"]{background:#c8f564!important;color:#0e0f13!important;border:none!important}
+input,textarea,[data-baseweb="input"] input{background:#1e2029!important;border:1px solid #2a2d3a!important;border-radius:9px!important;color:#e8eaf0!important}
+[data-baseweb="input"],[data-baseweb="base-input"]{background:#1e2029!important;border:1px solid #2a2d3a!important;border-radius:9px!important}
 [data-baseweb="select"]>div:first-child{background:#1e2029!important;border:1px solid #2a2d3a!important;border-radius:9px!important;color:#e8eaf0!important}
 [data-baseweb="popover"] ul,[data-baseweb="menu"]{background:#1e2029!important;border:1px solid #2a2d3a!important;border-radius:10px!important}
 [data-baseweb="menu"] li:hover{background:#2a2d3a!important}
+.stTextInput label,.stDateInput label,.stNumberInput label,.stSelectbox label,.stTextArea label{color:#7a7f96!important;font-size:12px!important}
+[data-testid="stForm"]{background:#16181f!important;border:1px solid #2a2d3a!important;border-radius:16px!important;padding:24px!important}
 div[data-testid="stSuccess"]{background:rgba(200,245,100,0.08)!important;border-left:4px solid #c8f564!important;border-radius:10px!important}
+div[data-testid="stError"]{background:rgba(255,107,107,0.08)!important;border-left:4px solid #ff6b6b!important;border-radius:10px!important}
 div[data-testid="stInfo"]{background:rgba(106,240,200,0.08)!important;border-left:4px solid #6af0c8!important;border-radius:10px!important}
-div[data-testid="stWarning"]{background:rgba(245,166,35,0.08)!important;border-left:4px solid #f5a623!important;border-radius:10px!important}
+[data-testid="stExpander"]{background:#16181f!important;border:1px solid #2a2d3a!important;border-radius:12px!important}
 hr{border-color:#2a2d3a!important}
+::-webkit-scrollbar{width:6px;height:6px}
+::-webkit-scrollbar-track{background:#0e0f13}
+::-webkit-scrollbar-thumb{background:#2a2d3a;border-radius:3px}
 </style>""", unsafe_allow_html=True)
 
-
-def _carregar_estado_do_banco(historico_id, aluno_id, treino_id):
-    """Recarrega todo o estado do treino a partir do Supabase."""
-    hist = db._retry(lambda: db.get_client().table("historico_treinos")
-                     .select("*").eq("id", historico_id).execute())
-    if not hist.data:
-        return False
-    reg = hist.data[0]
-
-    itens_df = db.listar_itens(treino_id)
-    if itens_df.empty:
-        return False
-
-    itens = itens_df.to_dict("records")
-    series_por_item = {}
-    for item in itens:
-        s_df = db.listar_series(int(item["id"]))
-        series_por_item[int(item["id"])] = s_df.to_dict("records")
-
-    st.session_state.aluno_id = aluno_id
-    st.session_state.treino_id = treino_id
-    st.session_state.historico_id = historico_id
-    st.session_state.itens = itens
-    st.session_state.series_por_item = series_por_item
-    st.session_state.item_idx = reg.get("item_idx") or 0
-    st.session_state.serie_idx = reg.get("serie_idx") or 0
-    st.session_state.tela = "executando"
-    return True
-
-
-# ── Estado da sessão ───────────────────────────────────────────────────────
-defaults = {
-    "tela": "selecao",
-    "aluno_id": None,
-    "treino_id": None,
-    "historico_id": None,
-    "itens": [],
-    "item_idx": 0,
-    "serie_idx": 0,
-    "series_por_item": {},
-    "timer_fim": None,
-    "timer_seg": 0,
-}
-for k, v in defaults.items():
-    if k not in st.session_state:
-        st.session_state[k] = v
-
-
-# ══════════════════════════════════════════════════════════════════════════
-# TELA 1 — SELEÇÃO
-# ══════════════════════════════════════════════════════════════════════════
-if st.session_state.tela == "selecao":
+# ── Sidebar ────────────────────────────────────────────────────────────────
+with st.sidebar:
     st.markdown("""
-    <div style="text-align:center;padding:20px 0 30px">
-        <div style="font-family:'DM Serif Display',serif;font-size:36px;color:#c8f564">GymFlow</div>
-        <div style="color:#7a7f96;font-size:13px;letter-spacing:2px;text-transform:uppercase;margin-top:4px">Seu treino de hoje</div>
+    <div style="padding-bottom:20px;border-bottom:1px solid #2a2d3a;margin-bottom:20px">
+        <div style="font-family:'DM Serif Display',serif;font-size:26px;color:#c8f564">GymFlow</div>
+        <div style="font-family:'DM Mono',monospace;font-size:10px;color:#7a7f96;letter-spacing:2px;text-transform:uppercase">Painel do Professor</div>
     </div>""", unsafe_allow_html=True)
-
-    alunos_df = db.listar_alunos()
-    if alunos_df.empty:
-        st.warning("Nenhum aluno cadastrado. Fale com seu professor.")
-        st.stop()
-
-    aluno_map = {int(r["id"]): r["nome"] for _, r in alunos_df.iterrows()}
-    sel_aluno = st.selectbox("Quem é você?", options=list(aluno_map.keys()),
-                              format_func=lambda x: aluno_map[x])
-
-    # Verifica se há treino em andamento (tela bloqueou)
-    em_andamento = db.buscar_treino_em_andamento(sel_aluno)
-    if em_andamento:
-        treino_id_and = em_andamento["treino_id"]
-        hist_id_and = em_andamento["id"]
-        treino_info = db._retry(lambda: db.get_client().table("treinos")
-                                 .select("nome,descricao").eq("id", treino_id_and).execute())
-        t_nome = treino_info.data[0]["nome"] if treino_info.data else "?"
-        t_desc = treino_info.data[0].get("descricao","") if treino_info.data else ""
-
-        st.markdown(f"""
-        <div style="background:#1e2029;border:2px solid #f5a623;border-radius:14px;padding:16px 20px;margin:16px 0;text-align:center">
-            <div style="font-size:11px;color:#f5a623;text-transform:uppercase;letter-spacing:1.5px">Treino em andamento</div>
-            <div style="font-size:20px;font-weight:600;color:#e8eaf0;margin-top:6px">Treino {t_nome} — {t_desc}</div>
-        </div>""", unsafe_allow_html=True)
-
-        col_ret, col_ab = st.columns(2)
-        with col_ret:
-            if st.button("▶️ Continuar treino", type="primary", use_container_width=True):
-                _carregar_estado_do_banco(hist_id_and, sel_aluno, treino_id_and)
-                st.rerun()
-        with col_ab:
-            if st.button("✕ Abandonar", use_container_width=True):
-                db.finalizar_treino(hist_id_and)
-                st.rerun()
-        st.divider()
-
-    planos_df = db.listar_planos(sel_aluno)
-    if planos_df.empty:
-        st.info("Nenhum plano de treino encontrado. Fale com seu professor.")
-        st.stop()
-
-    plano_atual = planos_df.iloc[0]
-    treinos_df = db.listar_treinos(int(plano_atual["id"]))
-
-    if treinos_df.empty:
-        st.info(f"O plano '{plano_atual['nome']}' ainda não tem treinos. Fale com seu professor.")
-        st.stop()
-
+    agora = datetime.now(TZ_BR)
     st.markdown(f"""
-    <div style="background:#16181f;border:1px solid #2a2d3a;border-radius:12px;padding:14px 18px;margin:16px 0;text-align:center">
-        <div style="font-size:11px;color:#7a7f96;text-transform:uppercase;letter-spacing:1.5px">Plano atual</div>
-        <div style="font-size:20px;font-weight:600;color:#e8eaf0;margin-top:4px">{plano_atual['nome']}</div>
+    <div style="padding:12px;background:#1e2029;border-radius:10px;border:1px solid #2a2d3a;text-align:center">
+        <div style="font-family:'DM Mono',monospace;font-size:24px;color:#c8f564">{agora.strftime('%H:%M')}</div>
+        <div style="font-size:11px;color:#7a7f96">{agora.strftime('%d/%m/%Y')}</div>
     </div>""", unsafe_allow_html=True)
 
-    # Monta opções de treino — marca os já feitos hoje
-    treino_opcoes = {}
-    for _, t in treinos_df.iterrows():
-        tid = int(t["id"])
-        feito = db.buscar_treino_finalizado_hoje(sel_aluno, tid)
-        label = f"Treino {t['nome']} — {t['descricao'] or ''}"
-        if feito:
-            label += " ✅ (concluído hoje)"
-        treino_opcoes[tid] = label
+# ── Dados globais ──────────────────────────────────────────────────────────
+alunos_df = db.listar_alunos()
+exercicios_df = db.listar_exercicios()
 
-    sel_treino = st.selectbox("Qual treino de hoje?", options=list(treino_opcoes.keys()),
-                               format_func=lambda x: treino_opcoes[x])
+# ── Tabs ───────────────────────────────────────────────────────────────────
+tab_alunos, tab_exercicios, tab_planos, tab_ficha, tab_hist = st.tabs([
+    "👤 Alunos", "💪 Exercícios", "📅 Planos", "📋 Ficha de Treino", "📊 Histórico"
+])
 
-    # Bloqueia se já foi feito hoje
-    ja_feito = db.buscar_treino_finalizado_hoje(sel_aluno, sel_treino)
+# ══════════════════════════════════════════════════════════════════════════
+# TAB 1 — ALUNOS
+# ══════════════════════════════════════════════════════════════════════════
+with tab_alunos:
+    st.markdown('<div style="font-family:\'DM Serif Display\',serif;font-size:24px;color:#e8eaf0;margin-bottom:20px">👤 Alunos</div>', unsafe_allow_html=True)
 
-    st.markdown("<br>", unsafe_allow_html=True)
+    c1, c2 = st.columns([1, 1])
+    c1.metric("Total de alunos", len(alunos_df))
 
-    if ja_feito:
-        st.markdown("""
-        <div style="background:rgba(200,245,100,0.08);border:1px solid rgba(200,245,100,0.3);border-radius:12px;padding:16px;text-align:center">
-            <div style="font-size:24px">✅</div>
-            <div style="color:#c8f564;font-weight:600;margin-top:6px">Treino já concluído hoje!</div>
-            <div style="color:#7a7f96;font-size:13px;margin-top:4px">Escolha outro treino ou volte amanhã.</div>
-        </div>""", unsafe_allow_html=True)
-    else:
-        if st.button("🏋️ Iniciar Treino", type="primary", use_container_width=True):
-            itens_df = db.listar_itens(sel_treino)
-            if itens_df.empty:
-                st.error("Este treino não tem exercícios. Fale com seu professor.")
-                st.stop()
-
-            itens = itens_df.to_dict("records")
-            series_por_item = {}
-            for item in itens:
-                s_df = db.listar_series(int(item["id"]))
-                series_por_item[int(item["id"])] = s_df.to_dict("records")
-
-            hist = db.iniciar_treino(sel_aluno, sel_treino)
-
-            st.session_state.aluno_id = sel_aluno
-            st.session_state.treino_id = sel_treino
-            st.session_state.historico_id = hist["id"]
-            st.session_state.itens = itens
-            st.session_state.series_por_item = series_por_item
-            st.session_state.item_idx = 0
-            st.session_state.serie_idx = 0
-            st.session_state.tela = "executando"
-            st.rerun()
+    with st.form("form_aluno", clear_on_submit=True):
+        st.markdown("**Novo aluno**")
+        fa1, fa2, fa3 = st.columns(3)
+        with fa1: a_nome = st.text_input("Nome *")
+        with fa2: a_email = st.text_input("Email")
+        with fa3: a_tel = st.text_input("Telefone")
+        if st.form_submit_button("✓ Cadastrar aluno", type="primary", use_container_width=True):
+            if not a_nome.strip():
+                st.error("Informe o nome do aluno.")
+            else:
+                db.salvar_aluno(a_nome, a_email, a_tel)
+                st.success(f"✓ Aluno '{a_nome}' cadastrado!")
+                st.rerun()
 
     st.divider()
-    hist_df = db.listar_historico(sel_aluno, limit=5)
-    if not hist_df.empty:
-        st.markdown("**Últimos treinos**")
-        for _, h in hist_df.iterrows():
-            if not h.get("finalizado_em"):
-                continue
-            data_fmt = pd.to_datetime(str(h["data"])).strftime("%d/%m/%Y")
-            duracao = ""
-            try:
-                ini = pd.to_datetime(h["iniciado_em"])
-                fim = pd.to_datetime(h["finalizado_em"])
-                mins = int((fim - ini).total_seconds() / 60)
-                duracao = f" — {mins} min"
-            except Exception:
-                pass
-            st.markdown(f"""
-            <div style="background:#16181f;border:1px solid #2a2d3a;border-radius:10px;padding:12px 16px;margin-bottom:8px;display:flex;justify-content:space-between">
-                <span>Treino {h['treino_nome']}</span>
-                <span style="color:#7a7f96;font-size:13px">{data_fmt}{duracao}</span>
-            </div>""", unsafe_allow_html=True)
-
+    if alunos_df.empty:
+        st.info("Nenhum aluno cadastrado.")
+    else:
+        for _, row in alunos_df.iterrows():
+            with st.expander(f"👤 {row['nome']}"):
+                i1, i2, i3 = st.columns([2, 2, 1])
+                i1.markdown(f"📧 {row['email'] or '—'}")
+                i2.markdown(f"📱 {row['telefone'] or '—'}")
+                if i3.button("Desativar", key=f"del_aluno_{row['id']}"):
+                    db.desativar_aluno(int(row["id"]))
+                    st.success("Aluno desativado.")
+                    st.rerun()
 
 # ══════════════════════════════════════════════════════════════════════════
-# TELA 2 — EXECUTANDO
+# TAB 2 — EXERCÍCIOS
 # ══════════════════════════════════════════════════════════════════════════
-elif st.session_state.tela == "executando":
-    itens = st.session_state.itens
-    item_idx = st.session_state.item_idx
-    serie_idx = st.session_state.serie_idx
-    item = itens[item_idx]
-    item_id = int(item["id"])
-    series = st.session_state.series_por_item.get(item_id, [])
-    total_itens = len(itens)
-    total_series = len(series)
+with tab_exercicios:
+    st.markdown('<div style="font-family:\'DM Serif Display\',serif;font-size:24px;color:#e8eaf0;margin-bottom:20px">💪 Exercícios</div>', unsafe_allow_html=True)
 
-    progresso = item_idx / total_itens
-    st.markdown(f"""
-    <div style="background:#16181f;border-radius:20px;height:6px;margin-bottom:20px;overflow:hidden">
-        <div style="background:#c8f564;height:100%;width:{progresso*100:.0f}%;border-radius:20px"></div>
-    </div>
-    <div style="text-align:right;font-size:11px;color:#7a7f96;margin-top:-14px;margin-bottom:20px">
-        Exercício {item_idx+1} de {total_itens}
-    </div>""", unsafe_allow_html=True)
+    GRUPOS = ["Peito","Costas","Pernas","Ombro","Bíceps","Tríceps","Abdômen","Cardio","Outro"]
 
-    tipo_badge = "🔺 Pirâmide" if item.get("tipo_serie") == "piramide" else "➡️ Linear"
-    comb_badge = "🔗 Combinado" if item.get("combinado_com") else ""
+    col_form_ex, col_list_ex = st.columns([1, 1], gap="large")
 
-    st.markdown(f"""
-    <div style="background:#16181f;border:1px solid #2a2d3a;border-radius:16px;padding:20px;margin-bottom:16px">
-        <div style="font-size:11px;color:#7a7f96;text-transform:uppercase;letter-spacing:1.5px">{item.get('exercicio_grupo','')}</div>
-        <div style="font-family:'DM Serif Display',serif;font-size:28px;color:#e8eaf0;margin:6px 0">{item.get('exercicio_nome','')}</div>
-        <div style="font-size:12px;color:#7a7f96">{tipo_badge} {'· ' + comb_badge if comb_badge else ''} · ⏱ {item.get('descanso_seg',60)}s descanso</div>
-        {f'<div style="font-size:13px;color:#6af0c8;margin-top:8px">📝 {item["observacao"]}</div>' if item.get("observacao") else ''}
-    </div>""", unsafe_allow_html=True)
+    with col_form_ex:
+        # Detecta se está em modo edição
+        editando_ex = st.session_state.get("editando_ex_id")
+        ex_edit = None
+        if editando_ex:
+            ex_edit = exercicios_df[exercicios_df["id"] == editando_ex]
+            ex_edit = ex_edit.iloc[0] if not ex_edit.empty else None
 
-    if serie_idx < total_series:
-        serie = series[serie_idx]
-        carga_txt = f" · {serie['carga']}kg" if serie.get('carga') else ""
+        titulo_form = "✏️ Editar exercício" if ex_edit is not None else "Novo exercício"
+        st.markdown(f'<div style="font-size:13px;font-weight:600;color:#7a7f96;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:12px">{titulo_form}</div>', unsafe_allow_html=True)
 
-        st.markdown(f"""
-        <div style="background:#1e2029;border:2px solid #c8f564;border-radius:16px;padding:24px;text-align:center;margin-bottom:20px">
-            <div style="font-size:11px;color:#7a7f96;text-transform:uppercase;letter-spacing:2px">Série atual</div>
-            <div style="font-family:'DM Mono',monospace;font-size:56px;font-weight:700;color:#c8f564;line-height:1.1">{serie_idx+1}</div>
-            <div style="font-size:13px;color:#7a7f96">de {total_series} séries</div>
-            <div style="font-size:22px;color:#e8eaf0;margin-top:12px;font-weight:600">{serie['repeticoes']} repetições{carga_txt}</div>
-        </div>""", unsafe_allow_html=True)
+        with st.form("form_exercicio", clear_on_submit=True):
+            grupo_idx = GRUPOS.index(ex_edit["grupo"]) if ex_edit is not None and ex_edit["grupo"] in GRUPOS else 0
+            e_grupo = st.selectbox("Grupo muscular", GRUPOS, index=grupo_idx)
+            e_nome = st.text_input("Nome *", value=ex_edit["nome"] if ex_edit is not None else "")
+            e_desc = st.text_input("Descrição (opcional)",
+                                    value=ex_edit["descricao"] if ex_edit is not None and ex_edit["descricao"] else "")
 
-        series_html = ""
-        for i, s in enumerate(series):
-            if i < serie_idx:
-                bg, cor, txt = "#c8f564", "#0e0f13", "✓"
-            elif i == serie_idx:
-                bg, cor, txt = "#2a2d3a", "#c8f564", str(i+1)
+            btn_label = "💾 Salvar alterações" if ex_edit is not None else "✓ Cadastrar exercício"
+            salvar_ex = st.form_submit_button(btn_label, type="primary", use_container_width=True)
+            if ex_edit is not None:
+                cancelar_ex = st.form_submit_button("✕ Cancelar edição", use_container_width=True)
             else:
-                bg, cor, txt = "#1e2029", "#7a7f96", str(i+1)
-            series_html += f'<div style="width:36px;height:36px;border-radius:50%;background:{bg};color:{cor};display:inline-flex;align-items:center;justify-content:center;font-weight:700;font-size:14px;margin:0 4px">{txt}</div>'
-        st.markdown(f'<div style="text-align:center;margin-bottom:20px">{series_html}</div>', unsafe_allow_html=True)
+                cancelar_ex = False
 
-        def _avancar(pular=False):
-            if not pular:
-                db.registrar_serie_executada(
-                    historico_treino_id=st.session_state.historico_id,
-                    treino_item_id=item_id,
-                    serie_numero=serie_idx + 1,
-                    repeticoes_feitas=serie.get("repeticoes"),
-                    carga_usada=serie.get("carga"),
-                )
-            prox_serie = serie_idx + 1
-            if prox_serie >= total_series:
-                prox_item = item_idx + 1
-                if prox_item >= total_itens:
-                    st.session_state.tela = "concluido"
+            if salvar_ex:
+                if not e_nome.strip():
+                    st.error("Informe o nome do exercício.")
                 else:
-                    st.session_state.item_idx = prox_item
-                    st.session_state.serie_idx = 0
-                    db.salvar_progresso(st.session_state.historico_id, prox_item, 0)
-                    st.session_state.timer_seg = int(item.get("descanso_seg", 60))
-                    st.session_state.tela = "descanso"
+                    if ex_edit is not None:
+                        # Atualiza direto no Supabase
+                        client = db.get_client()
+                        db._retry(lambda: client.table("exercicios")
+                                  .update({"nome": e_nome.strip(), "grupo": e_grupo,
+                                           "descricao": e_desc or None})
+                                  .eq("id", int(editando_ex)).execute())
+                        st.session_state.pop("editando_ex_id", None)
+                        st.success(f"✓ Exercício '{e_nome}' atualizado!")
+                    else:
+                        db.salvar_exercicio(e_nome, e_grupo, e_desc)
+                        st.success(f"✓ Exercício '{e_nome}' cadastrado!")
+                    st.rerun()
+
+            if cancelar_ex:
+                st.session_state.pop("editando_ex_id", None)
+                st.rerun()
+
+    with col_list_ex:
+        st.markdown('<div style="font-size:13px;font-weight:600;color:#7a7f96;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:12px">Exercícios Cadastrados</div>', unsafe_allow_html=True)
+
+        if exercicios_df.empty:
+            st.info("Nenhum exercício cadastrado.")
+        else:
+            for grupo in sorted(exercicios_df["grupo"].dropna().unique().tolist()):
+                st.markdown(f'<div style="font-size:12px;font-weight:700;color:#c8f564;text-transform:uppercase;letter-spacing:1.5px;margin:14px 0 6px">{grupo}</div>', unsafe_allow_html=True)
+                df_g = exercicios_df[exercicios_df["grupo"] == grupo]
+                for _, row in df_g.iterrows():
+                    ex_id = int(row["id"])
+                    c_nome, c_edit, c_del = st.columns([6, 1, 1])
+                    with c_nome:
+                        st.markdown(f"""
+                        <div style="background:#16181f;border:1px solid #2a2d3a;border-radius:10px;padding:10px 14px;font-size:13px;color:#e8eaf0">
+                            {row['nome']}
+                            {f'<span style="font-size:11px;color:#7a7f96;margin-left:8px">— {row["descricao"]}</span>' if row.get("descricao") else ''}
+                        </div>""", unsafe_allow_html=True)
+                    with c_edit:
+                        if st.button("✏️", key=f"edit_ex_{ex_id}", help="Editar"):
+                            st.session_state["editando_ex_id"] = ex_id
+                            st.rerun()
+                    with c_del:
+                        if st.button("🗑", key=f"del_ex_{ex_id}", help="Excluir"):
+                            try:
+                                db.excluir_exercicio(ex_id)
+                                st.success(f"Exercício removido.")
+                                st.rerun()
+                            except Exception:
+                                st.error("Não é possível excluir: exercício está em uso em algum treino.")
+
+# ══════════════════════════════════════════════════════════════════════════
+# TAB 3 — PLANOS
+# ══════════════════════════════════════════════════════════════════════════
+with tab_planos:
+    st.markdown('<div style="font-family:\'DM Serif Display\',serif;font-size:24px;color:#e8eaf0;margin-bottom:20px">📅 Planos de Treino</div>', unsafe_allow_html=True)
+
+    if alunos_df.empty:
+        st.warning("Cadastre um aluno primeiro.")
+    else:
+        aluno_map = {int(r["id"]): r["nome"] for _, r in alunos_df.iterrows()}
+
+        with st.form("form_plano", clear_on_submit=True):
+            st.markdown("**Novo plano**")
+            fp1, fp2, fp3 = st.columns([2, 1, 1])
+            with fp1:
+                p_aluno = st.selectbox("Aluno", options=list(aluno_map.keys()),
+                                       format_func=lambda x: aluno_map[x])
+            with fp2:
+                agora_br = datetime.now(TZ_BR)
+                p_mes = st.text_input("Mês (YYYY-MM)", value=agora_br.strftime("%Y-%m"))
+            with fp3:
+                MESES_PT = ["","Janeiro","Fevereiro","Março","Abril","Maio","Junho",
+                            "Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"]
+                try:
+                    y, m = p_mes.split("-")
+                    p_nome = f"{MESES_PT[int(m)]}/{y}"
+                except Exception:
+                    p_nome = p_mes
+                st.text_input("Nome do plano", value=p_nome, disabled=True)
+
+            if st.form_submit_button("✓ Criar plano", type="primary", use_container_width=True):
+                db.salvar_plano(p_aluno, p_nome, p_mes)
+                st.success(f"✓ Plano '{p_nome}' criado para {aluno_map[p_aluno]}!")
+                st.rerun()
+
+        st.divider()
+        planos_df = db.listar_planos()
+        if not planos_df.empty:
+            planos_df["aluno_nome"] = planos_df["aluno_id"].apply(
+                lambda x: aluno_map.get(int(x), "—"))
+            for aluno_nome in planos_df["aluno_nome"].unique():
+                st.markdown(f"**👤 {aluno_nome}**")
+                df_a = planos_df[planos_df["aluno_nome"] == aluno_nome]
+                for _, row in df_a.iterrows():
+                    c1, c2 = st.columns([4, 1])
+                    c1.markdown(f"📅 {row['nome']} — `{row['mes']}`")
+                    if c2.button("🗑", key=f"del_plano_{row['id']}"):
+                        db.excluir_plano(int(row["id"]))
+                        st.rerun()
+
+# ══════════════════════════════════════════════════════════════════════════
+# TAB 4 — FICHA DE TREINO
+# ══════════════════════════════════════════════════════════════════════════
+with tab_ficha:
+    st.markdown('<div style="font-family:\'DM Serif Display\',serif;font-size:24px;color:#e8eaf0;margin-bottom:20px">📋 Ficha de Treino</div>', unsafe_allow_html=True)
+
+    planos_df = db.listar_planos()
+    if planos_df.empty or alunos_df.empty:
+        st.warning("Cadastre um aluno e crie um plano primeiro.")
+    else:
+        aluno_map = {int(r["id"]): r["nome"] for _, r in alunos_df.iterrows()}
+        planos_df["aluno_nome"] = planos_df["aluno_id"].apply(lambda x: aluno_map.get(int(x), "—"))
+        planos_df["label"] = planos_df["aluno_nome"] + " — " + planos_df["nome"]
+        plano_map = {int(r["id"]): r["label"] for _, r in planos_df.iterrows()}
+
+        sel_plano = st.selectbox("Selecione o plano", options=list(plano_map.keys()),
+                                  format_func=lambda x: plano_map[x])
+
+        treinos_df = db.listar_treinos(sel_plano)
+
+        # ── Layout duas colunas ──────────────────────────────────────────
+        col_esq, col_dir = st.columns([1, 1], gap="large")
+
+        # ── COLUNA ESQUERDA — Formulários ────────────────────────────────
+        with col_esq:
+            st.markdown('<div style="font-size:13px;font-weight:600;color:#7a7f96;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:12px">Adicionar Treino</div>', unsafe_allow_html=True)
+
+            with st.form("form_treino", clear_on_submit=True):
+                ft1, ft2 = st.columns([1, 2])
+                with ft1:
+                    t_nome = st.text_input("Treino", placeholder="A, B, C...")
+                with ft2:
+                    t_desc = st.text_input("Descrição", placeholder="Ex: Peito e Tríceps")
+                if st.form_submit_button("+ Adicionar treino", use_container_width=True):
+                    if t_nome.strip():
+                        ordem = len(treinos_df)
+                        db.salvar_treino(sel_plano, t_nome.upper(), t_desc, ordem)
+                        st.rerun()
+
+            if not treinos_df.empty:
+                ex_map = {int(r["id"]): r["nome"] for _, r in exercicios_df.iterrows()}
+
+                # Selectbox para escolher em qual treino adicionar exercício
+                st.markdown('<div style="font-size:13px;font-weight:600;color:#7a7f96;text-transform:uppercase;letter-spacing:1.5px;margin:20px 0 12px">Adicionar Exercício</div>', unsafe_allow_html=True)
+
+                treino_sel_map = {int(r["id"]): f"Treino {r['nome']} — {r['descricao'] or ''}" for _, r in treinos_df.iterrows()}
+                treino_sel_id = st.selectbox("Treino de destino", options=list(treino_sel_map.keys()),
+                                              format_func=lambda x: treino_sel_map[x], key="treino_dest")
+
+                itens_dest = db.listar_itens(treino_sel_id)
+
+                fi1, fi2 = st.columns([3, 1])
+                with fi1:
+                    ex_sel = st.selectbox("Exercício", options=list(ex_map.keys()),
+                                           format_func=lambda x: ex_map[x], key="ex_novo")
+                with fi2:
+                    tipo_s = st.selectbox("Tipo", options=["linear","piramide"],
+                                           format_func=lambda x: "Linear" if x == "linear" else "Pirâmide",
+                                           key="tipo_novo")
+
+                fi3, fi4 = st.columns([1, 2])
+                with fi3:
+                    descanso = st.number_input("Descanso (s)", min_value=10, max_value=300,
+                                                value=60, step=5, key="desc_novo")
+                with fi4:
+                    comb_opts = {"": "— Nenhum —"}
+                    if not itens_dest.empty:
+                        comb_opts.update({str(int(r["id"])): r["exercicio_nome"]
+                                           for _, r in itens_dest.iterrows()})
+                    comb_sel = st.selectbox("Combinado com", options=list(comb_opts.keys()),
+                                             format_func=lambda x: comb_opts[x], key="comb_novo")
+
+                obs_item = st.text_input("Observação", key="obs_novo")
+
+                n_series = st.number_input("Nº de séries", min_value=1, max_value=8, value=3,
+                                            step=1, key="ns_novo")
+
+                st.markdown('<div style="font-size:12px;color:#7a7f96;margin:8px 0 4px">Séries</div>', unsafe_allow_html=True)
+                series_cols = st.columns(int(n_series))
+                series_keys = list(range(int(n_series)))
+                for i in series_keys:
+                    with series_cols[i]:
+                        st.markdown(f"**{i+1}ª**")
+                        st.number_input("Reps", min_value=1, max_value=100,
+                                         value=12, key=f"reps_novo_{i}")
+                        st.number_input("kg", min_value=0.0, step=0.5,
+                                         value=0.0, key=f"carga_novo_{i}")
+
+                if st.button("✓ Adicionar exercício", type="primary",
+                              use_container_width=True, key="btn_add_ex"):
+                    comb_id = int(comb_sel) if comb_sel else None
+                    series_vals = [(st.session_state[f"reps_novo_{i}"],
+                                    st.session_state[f"carga_novo_{i}"]) for i in series_keys]
+                    item = db.salvar_item(
+                        treino_id=treino_sel_id, exercicio_id=ex_sel,
+                        ordem=len(itens_dest), tipo_serie=tipo_s,
+                        descanso_seg=descanso, combinado_com=comb_id, observacao=obs_item
+                    )
+                    item_id = item["id"]
+                    for i, (reps, carga) in enumerate(series_vals):
+                        db.salvar_serie(item_id, i+1, reps, carga if carga > 0 else None)
+                    st.success("✓ Exercício adicionado!")
+                    st.rerun()
+
+        # ── COLUNA DIREITA — Treinos criados ─────────────────────────────
+        with col_dir:
+            st.markdown('<div style="font-size:13px;font-weight:600;color:#7a7f96;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:12px">Treinos do Plano</div>', unsafe_allow_html=True)
+
+            if treinos_df.empty:
+                st.markdown("""
+                <div style="background:#16181f;border:1px dashed #2a2d3a;border-radius:14px;padding:32px;text-align:center;color:#7a7f96">
+                    Nenhum treino criado ainda.<br>Adicione um treino ao lado.
+                </div>""", unsafe_allow_html=True)
             else:
-                st.session_state.serie_idx = prox_serie
-                db.salvar_progresso(st.session_state.historico_id, item_idx, prox_serie)
-                st.session_state.timer_seg = int(item.get("descanso_seg", 60))
-                st.session_state.tela = "descanso"
+                for _, treino in treinos_df.iterrows():
+                    treino_id = int(treino["id"])
+                    itens_df = db.listar_itens(treino_id)
 
-        if st.button("✅ Série concluída!", type="primary", use_container_width=True):
-            _avancar(pular=False)
-            st.rerun()
+                    # Cabeçalho do treino
+                    st.markdown(f"""
+                    <div style="background:#16181f;border:1px solid #2a2d3a;border-top:3px solid #c8f564;border-radius:14px;padding:16px 20px;margin-bottom:4px">
+                        <div style="display:flex;justify-content:space-between;align-items:center">
+                            <div>
+                                <span style="font-family:'DM Serif Display',serif;font-size:20px;color:#c8f564">Treino {treino['nome']}</span>
+                                <span style="font-size:13px;color:#7a7f96;margin-left:10px">{treino['descricao'] or ''}</span>
+                            </div>
+                            <span style="font-size:12px;color:#7a7f96">{len(itens_df)} exercício(s)</span>
+                        </div>
+                    </div>""", unsafe_allow_html=True)
 
-        col_pular, col_sair = st.columns(2)
-        with col_pular:
-            if st.button("⏭ Pular série", use_container_width=True):
-                _avancar(pular=True)
-                st.rerun()
-        with col_sair:
-            if st.button("🚪 Encerrar treino", use_container_width=True):
-                db.finalizar_treino(st.session_state.historico_id)
-                st.session_state.tela = "selecao"
-                st.rerun()
+                    if itens_df.empty:
+                        st.markdown('<div style="color:#7a7f96;font-size:13px;padding:8px 20px;margin-bottom:12px">Nenhum exercício ainda.</div>', unsafe_allow_html=True)
+                    else:
+                        for idx, item in itens_df.iterrows():
+                            item_id = int(item["id"])
+                            series_df = db.listar_series(item_id)
+                            tipo_badge = "🔺" if item["tipo_serie"] == "piramide" else "➡️"
+                            comb_txt = ""
+                            if item.get("combinado_com"):
+                                item_comb = itens_df[itens_df["id"] == item["combinado_com"]]
+                                if not item_comb.empty:
+                                    comb_txt = f"🔗 {item_comb.iloc[0]['exercicio_nome']}"
 
+                            series_html = ""
+                            for _, s in series_df.iterrows():
+                                carga_txt = f"/{s['carga']}kg" if s['carga'] else ""
+                                series_html += f'<span style="background:#1e2029;border:1px solid #2a2d3a;border-radius:6px;padding:3px 8px;margin-right:4px;font-family:DM Mono,monospace;font-size:11px;color:#c8f564">{int(s["numero"])}ª {int(s["repeticoes"])}x{carga_txt}</span>'
+
+                            col_info, col_del = st.columns([9, 1])
+                            with col_info:
+                                st.markdown(f"""
+                                <div style="background:#1e2029;border-left:3px solid #2a2d3a;border-radius:0 10px 10px 0;padding:12px 16px;margin-bottom:6px">
+                                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+                                        <span style="font-weight:600;color:#e8eaf0;font-size:14px">{tipo_badge} {item['exercicio_nome']}</span>
+                                        <span style="font-size:11px;color:#7a7f96">⏱ {item['descanso_seg']}s {'· ' + comb_txt if comb_txt else ''}</span>
+                                    </div>
+                                    <div style="flex-wrap:wrap">{series_html}</div>
+                                    {f'<div style="font-size:11px;color:#6af0c8;margin-top:6px">📝 {item["observacao"]}</div>' if item.get("observacao") else ''}
+                                </div>""", unsafe_allow_html=True)
+                            with col_del:
+                                if st.button("🗑", key=f"del_item_{item_id}"):
+                                    db.excluir_series_do_item(item_id)
+                                    db.excluir_item(item_id)
+                                    st.rerun()
+
+                    if st.button(f"🗑 Excluir treino {treino['nome']}", key=f"del_treino_{treino_id}"):
+                        db.excluir_treino(treino_id)
+                        st.rerun()
+
+                    st.markdown("<div style='margin-bottom:12px'></div>", unsafe_allow_html=True)
 
 # ══════════════════════════════════════════════════════════════════════════
-# TELA 3 — DESCANSO
+# TAB 5 — HISTÓRICO / GERENCIAR TREINOS
 # ══════════════════════════════════════════════════════════════════════════
-elif st.session_state.tela == "descanso":
-    total_seg = st.session_state.timer_seg
-    item_idx = st.session_state.item_idx
-    serie_idx = st.session_state.serie_idx
-    itens = st.session_state.itens
-    item_atual = itens[item_idx]
-    total_series = len(st.session_state.series_por_item.get(int(item_atual["id"]), []))
+with tab_hist:
+    st.markdown('<div style="font-family:\'DM Serif Display\',serif;font-size:24px;color:#e8eaf0;margin-bottom:20px">📊 Histórico de Treinos</div>', unsafe_allow_html=True)
 
-    if st.session_state.timer_fim is None:
-        st.session_state.timer_fim = time.time() + total_seg
+    from datetime import date as date_cls
 
-    restante = max(0, int(st.session_state.timer_fim - time.time()))
-    pct = restante / total_seg if total_seg > 0 else 0
-    mins = restante // 60
-    segs = restante % 60
+    col_data, col_aluno = st.columns([1, 2])
+    with col_data:
+        data_sel = st.date_input("📅 Data", value=date_cls.today(), format="DD/MM/YYYY", key="hist_data")
+    with col_aluno:
+        aluno_opts_h = {"": "— Todos os alunos —"}
+        aluno_opts_h.update({int(r["id"]): r["nome"] for _, r in alunos_df.iterrows()})
+        aluno_hist_sel = st.selectbox("👤 Aluno", options=list(aluno_opts_h.keys()),
+                                      format_func=lambda x: aluno_opts_h[x], key="hist_aluno")
 
-    if restante > total_seg * 0.5:
-        cor_timer = "#6af0c8"
-    elif restante > total_seg * 0.2:
-        cor_timer = "#f5a623"
+    hist_df = db.listar_historico_hoje(str(data_sel))
+
+    if not hist_df.empty and aluno_hist_sel:
+        hist_df = hist_df[hist_df["aluno_id"] == aluno_hist_sel]
+
+    st.divider()
+
+    if hist_df.empty:
+        st.info("Nenhum treino registrado nesta data.")
     else:
-        cor_timer = "#ff6b6b"
+        em_andamento = hist_df[hist_df["finalizado_em"].isna()]
+        finalizados  = hist_df[hist_df["finalizado_em"].notna()]
 
-    st.markdown(f"""
-    <div style="text-align:center;padding:30px 0">
-        <div style="font-size:13px;color:#7a7f96;text-transform:uppercase;letter-spacing:2px;margin-bottom:16px">⏱ Descansando</div>
-        <div style="font-family:'DM Mono',monospace;font-size:72px;font-weight:700;color:{cor_timer};line-height:1">{mins:02d}:{segs:02d}</div>
-        <div style="margin:20px auto;max-width:280px;background:#1e2029;border-radius:20px;height:8px;overflow:hidden">
-            <div style="background:{cor_timer};height:100%;width:{pct*100:.1f}%;border-radius:20px"></div>
-        </div>
-        <div style="color:#7a7f96;font-size:13px">Próximo: <b style="color:#e8eaf0">{item_atual.get('exercicio_nome','')} — Série {serie_idx+1}/{total_series}</b></div>
-    </div>""", unsafe_allow_html=True)
+        if not em_andamento.empty:
+            st.markdown('<div style="font-size:13px;font-weight:600;color:#f5a623;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:10px">⏳ Em andamento</div>', unsafe_allow_html=True)
+            for _, row in em_andamento.iterrows():
+                hist_id = int(row["id"])
+                hora_ini = pd.to_datetime(str(row["iniciado_em"])).strftime("%H:%M") if row.get("iniciado_em") else "—"
+                c1, c2 = st.columns([7, 1])
+                with c1:
+                    st.markdown(f'<div style="background:#16181f;border:1px solid #f5a623;border-radius:12px;padding:14px 18px;margin-bottom:8px"><div style="font-weight:600;color:#e8eaf0">{row["aluno_nome"]} — Treino {row["treino_nome"]}</div><div style="font-size:12px;color:#7a7f96;margin-top:4px">🕐 Iniciado às {hora_ini}</div></div>', unsafe_allow_html=True)
+                with c2:
+                    if st.button("🗑", key=f"del_and_{hist_id}", help="Excluir"):
+                        db.excluir_historico(hist_id)
+                        st.rerun()
 
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("⚡ Pular descanso", use_container_width=True):
-            st.session_state.timer_fim = None
-            st.session_state.tela = "executando"
-            st.rerun()
-    with col2:
-        if st.button("➕ +30s", use_container_width=True):
-            st.session_state.timer_fim += 30
-            st.rerun()
-
-    if restante <= 0:
-        st.session_state.timer_fim = None
-        st.session_state.tela = "executando"
-        st.rerun()
-    else:
-        time.sleep(1)
-        st.rerun()
-
-
-# ══════════════════════════════════════════════════════════════════════════
-# TELA 4 — CONCLUÍDO
-# ══════════════════════════════════════════════════════════════════════════
-elif st.session_state.tela == "concluido":
-    db.finalizar_treino(st.session_state.historico_id)
-
-    st.markdown("""
-    <div style="text-align:center;padding:40px 0">
-        <div style="font-size:64px;margin-bottom:16px">🏆</div>
-        <div style="font-family:'DM Serif Display',serif;font-size:36px;color:#c8f564;margin-bottom:8px">Treino Concluído!</div>
-        <div style="color:#7a7f96;font-size:15px">Excelente trabalho! Continue assim.</div>
-    </div>""", unsafe_allow_html=True)
-
-    total_series = sum(len(v) for v in st.session_state.series_por_item.values())
-    total_exercicios = len(st.session_state.itens)
-
-    st.markdown(f"""
-    <div style="display:flex;gap:12px;margin:20px 0">
-        <div style="flex:1;background:#16181f;border:1px solid #2a2d3a;border-radius:14px;padding:20px;text-align:center;border-top:3px solid #c8f564">
-            <div style="font-family:'DM Mono',monospace;font-size:32px;color:#c8f564">{total_exercicios}</div>
-            <div style="font-size:11px;color:#7a7f96;text-transform:uppercase;letter-spacing:1px;margin-top:4px">Exercícios</div>
-        </div>
-        <div style="flex:1;background:#16181f;border:1px solid #2a2d3a;border-radius:14px;padding:20px;text-align:center;border-top:3px solid #6af0c8">
-            <div style="font-family:'DM Mono',monospace;font-size:32px;color:#6af0c8">{total_series}</div>
-            <div style="font-size:11px;color:#7a7f96;text-transform:uppercase;letter-spacing:1px;margin-top:4px">Séries</div>
-        </div>
-    </div>""", unsafe_allow_html=True)
-
-    st.markdown("<br>", unsafe_allow_html=True)
-    if st.button("🏠 Voltar ao início", type="primary", use_container_width=True):
-        for key in list(st.session_state.keys()):
-            del st.session_state[key]
-        st.rerun()
+        if not finalizados.empty:
+            st.markdown('<div style="font-size:13px;font-weight:600;color:#c8f564;text-transform:uppercase;letter-spacing:1.5px;margin:16px 0 10px">✅ Finalizados</div>', unsafe_allow_html=True)
+            for _, row in finalizados.iterrows():
+                hist_id = int(row["id"])
+                duracao = ""
+                try:
+                    ini = pd.to_datetime(str(row["iniciado_em"]))
+                    fim = pd.to_datetime(str(row["finalizado_em"]))
+                    mins = int((fim - ini).total_seconds() / 60)
+                    duracao = f" · {mins} min"
+                except Exception:
+                    pass
+                hora_ini = pd.to_datetime(str(row["iniciado_em"])).strftime("%H:%M") if row.get("iniciado_em") else "—"
+                hora_fim = pd.to_datetime(str(row["finalizado_em"])).strftime("%H:%M") if row.get("finalizado_em") else "—"
+                c1, c2, c3 = st.columns([6, 1, 1])
+                with c1:
+                    st.markdown(f'<div style="background:#16181f;border:1px solid #2a2d3a;border-radius:12px;padding:14px 18px;margin-bottom:8px"><div style="font-weight:600;color:#e8eaf0">{row["aluno_nome"]} — Treino {row["treino_nome"]} <span style="font-size:12px;color:#7a7f96">{row["treino_desc"]}</span></div><div style="font-size:12px;color:#7a7f96;margin-top:4px">🕐 {hora_ini} → {hora_fim}{duracao}</div></div>', unsafe_allow_html=True)
+                with c2:
+                    if st.button("↩️", key=f"reabrir_{hist_id}", help="Reabrir treino"):
+                        db.reabrir_treino(hist_id)
+                        st.success(f"Treino reaberto!")
+                        st.rerun()
+                with c3:
+                    if st.button("🗑", key=f"del_hist_{hist_id}", help="Excluir registro"):
+                        db.excluir_historico(hist_id)
+                        st.rerun()
